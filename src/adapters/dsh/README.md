@@ -42,6 +42,7 @@ await ctx.plugin(DagWorkflow, {
 
 DSH 0.2 系列内两代宿主 API 在调用时按服务暴露的方法识别，不按版本号判断：
 
+- 形状按服务实际暴露的方法选择，不按版本号：未发布或自行构建的宿主可能在较低版本号下已带新形状。
 - Tool：0.2.1-rc.4 及以前传单次调用 `{ callId, name, arguments, signal, agent }`；0.2.2 起（`ctx.tools` 带 `setExecutor()`）传只含一个 `{ type: 'tool-call', id, name, arguments: JSON 文本 }` 的批量输入，并按 `callId` 取回唯一结果。批量执行器失败（`ToolBatchExecutionError`）、结果缺失或 `callId` 不匹配都映射为 `DSH_TOOL_FAILED`。批量调用不传 `toolSet`，因此用 `when` 条件注册的 Tool 不会被准入（`UNKNOWN_TOOL`），尽管 `workflow_nodes_list` 仍会列出它们。
 - Agent：0.2.0-rc.2 与 0.2.1-alpha.1 使用 `start()`，节点 `tools` 映射为 `toolFilter.allow`；0.2.1-alpha.3 起使用 `startActivation({ delivery: 'caller' })`，结果只返回给 Workflow，不通知父 Agent 模型。activation 的 signal 只覆盖启动阶段，发布后的取消与超时通过 `dispose()` 完成。
 - Provider 只在声明了节点所需全部能力（`outputSchema`，以及 `tools` 对应的 `toolFilter`）时被选中，没有兼容 provider 时节点以 `AGENT_TARGET_UNAVAILABLE` 失败，不会退回不兼容的 provider。`startActivation()` 没有逐次 Tool 过滤，带 `tools` 的节点因此 fail closed，包括在旧 DSH 上启动、升级后恢复的 run；`workflow_nodes_list` 此时报告 `toolFilter: false`。

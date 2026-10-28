@@ -276,7 +276,7 @@ dsh plugin --profile web add @gm-hz/agent-dag-workflow
 
 `1.0.1` 面向 DSH `>=0.2.0-rc.2 <0.3.0`。DSH 0.2 删除了旧的 `dsh-client-runtime`，Canvas 改为依赖 `api-remotes`、`ui-session`、`ui-renderer` 和 `ui-layout`，并从 `uiSession.adapter.current.key` 获取当前会话；旧 DSH 0.1 部署应固定使用本包 `1.0.0`。
 
-0.2 系列内 Subagent 与 Tool 的宿主 API 各换过一次形状，Adapter 在调用时按服务实际暴露的方法选择：`ctx.subagents.start()`（0.2.0-rc.2、0.2.1-alpha.1）或 `startActivation()`（0.2.1-alpha.3 起）；`ctx.tools.execute()` 的单次调用（至 0.2.1-rc.4）或批量调用（0.2.2 起，服务带 `setExecutor()`）。这些形状已按 0.2.0-rc.2、0.2.1-alpha.1/3/5、0.2.1-rc.1 至 rc.4 与 0.2.2-alpha.2 的发布类型核对。npm/pnpm 的 semver 不把其他 patch 版本的预发布（如 `0.2.1-rc.3`、`0.2.2-alpha.2`）计入该 peer 范围，安装时会提示 unmet peer，但 Adapter 支持它们。
+0.2 系列内 Subagent 与 Tool 的宿主 API 各换过一次形状，Adapter 在调用时按服务实际暴露的方法选择：`ctx.subagents.start()`（0.2.0-rc.2、0.2.1-alpha.1）或 `startActivation()`（0.2.1-alpha.3 起）；`ctx.tools.execute()` 的单次调用（至 0.2.1-rc.4）或批量调用（0.2.2 起，服务带 `setExecutor()`）。这些形状已按 0.2.0-rc.2、0.2.1-alpha.1/3/5、0.2.1-rc.1 至 rc.4 与 0.2.2-alpha.2 的发布类型核对。版本号只是参考：未发布或自行构建的宿主（例如标为 0.2.1-rc.3 的源码构建）可能已带新形状，Adapter 只按方法判断，不按版本号判断。npm/pnpm 的 semver 不把其他 patch 版本的预发布（如 `0.2.1-rc.3`、`0.2.2-alpha.2`）计入该 peer 范围，安装时会提示 unmet peer，但 Adapter 支持它们。
 
 从当前源码验证时只链接仓库根目录：
 
