@@ -435,8 +435,14 @@ describe('W1-25 tool.call@1 on the batch ToolsService (0.2.2)', () => {
   it('ends the node cancelled when the batch reports calls aborted before dispatch', async () => {
     const { ctx, parent } = await mount(BatchTools, ActivationSubagents)
     const tools = service<BatchTools>(ctx, 'tools')
-    tools.respond = input => new Promise(resolve => {
+    let answered: Promise<ToolBatchResult> | undefined
+    // Like executeToolBatch, answer every input call with the synthetic pre-dispatch abort result.
+    tools.respond = input => answered = new Promise((resolve, reject) => {
       input.signal.addEventListener('abort', () => {
+        if (!Array.isArray(input.calls)) {
+          reject(new TypeError('ToolBatchInput.calls must be an array'))
+          return
+        }
         resolve({
           results: input.calls.map(call => ({
             callId: call.id,
@@ -454,7 +460,16 @@ describe('W1-25 tool.call@1 on the batch ToolsService (0.2.2)', () => {
     const run = await ctx.dagWorkflowEngine.start({ template: toolTemplate(), inputs: { message: 'hi' }, parent })
     await vi.waitFor(() => { expect(tools.batches).toHaveLength(1) })
     await run.cancel('stop')
+    const result = await run.result
 
-    expect(await run.result).toMatchObject({ status: 'cancelled', nodeStates: { echo: 'cancelled' } })
+    expect(result).toMatchObject({ status: 'cancelled', nodeStates: { echo: 'cancelled' } })
+    const [batch] = tools.batches
+    expect(batch?.signal.aborted).toBe(true)
+    await expect(answered).resolves.toMatchObject({
+      results: [{ callId: batch?.calls?.[0]?.id, result: { isError: true, error: { info: { code: 'ABORTED_BEFORE_DISPATCH' } } } }],
+    })
+    const events = await eventsOf(ctx, result.runId)
+    expect(events.filter(event => event.type === 'node.failed' || event.type === 'capability.failed')).toEqual([])
+    expect(events).toContainEqual(expect.objectContaining({ type: 'run.cancelled', reason: 'stop' }))
   })
 })

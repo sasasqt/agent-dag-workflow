@@ -57,7 +57,7 @@ import type {
   DshWorkflowRun,
 } from './types.js'
 import { executeDshAgent, type DshSubagentService } from './agent-gateway.js'
-import { createDshToolGateway, type DshToolService } from './tool-gateway.js'
+import { createDshToolGateway, isDshAgentLike, type DshToolService } from './tool-gateway.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -305,17 +305,9 @@ export class DshDagWorkflowEngineService extends DagWorkflowEngineService {
   constructor(ctx: Context, private readonly config: DshWorkflowPluginConfig = {}) {
     super(ctx)
     const runtime = ctx as DshRuntimeContext
-    const tools = createDshToolGateway(runtime.tools)
     const services: WorkflowEngineServices = {
       capabilities: ctx.workflowCapabilities.registry,
-      tools: {
-        execute: async request => {
-          if (!isDshAgentLike(request.authority)) {
-            throw new WorkflowExecutionError('DSH_AGENT_MISSING', 'tool.call requires the owning DSH Agent', { nodeId: request.nodeId })
-          }
-          return tools.execute(request)
-        },
-      },
+      tools: createDshToolGateway(runtime.tools),
       agents: {
         execute: async request => {
           if (!isDshAgentLike(request.authority)) {
@@ -511,12 +503,6 @@ function adaptRunHandle(handle: WorkflowRunHandle): DshWorkflowRun {
       await result
     },
   }
-}
-
-function isDshAgentLike(value: unknown): value is DshAgentLike {
-  if (value === null || typeof value !== 'object' || !('session' in value)) return false
-  const session = value.session
-  return session !== null && typeof session === 'object' && 'append' in session && typeof session.append === 'function'
 }
 
 function ownerReference(config: DshWorkflowPluginConfig, parent: DshAgentLike): string {

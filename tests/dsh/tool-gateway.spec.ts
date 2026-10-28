@@ -15,9 +15,10 @@ describe('DSH Tool gateway', () => {
   })
 
   // dsh-tools 0.2.2 ToolsService: execute(ToolBatchInput) → ToolBatchResult, identified by setExecutor.
-  const request = (signal: AbortSignal) => ({
+  const agent = { session: { append() {} } }
+  const request = (signal: AbortSignal, authority: unknown = agent) => ({
     runId: 'run-1', nodeId: 'node-1', invocationId: 'run-1:node-1:1', uses: 'search',
-    inputs: { q: 'query' }, config: { uses: 'search' }, authority: { session: 'test' }, signal,
+    inputs: { q: 'query' }, config: { uses: 'search' }, authority, signal,
   })
 
   it('adapts the batch ToolsService of DSH 0.2.2 when given the tools service', async () => {
@@ -35,7 +36,7 @@ describe('DSH Tool gateway', () => {
     expect(tools.execute).toHaveBeenCalledWith({
       calls: [{ type: 'tool-call', id: 'run-1:node-1:1', name: 'search', arguments: '{"q":"query"}' }],
       signal,
-      agent: { session: 'test' },
+      agent,
     })
   })
 
@@ -59,6 +60,19 @@ describe('DSH Tool gateway', () => {
     const signal = new AbortController().signal
 
     await expect(createDshToolGateway(tools).execute(request(signal))).resolves.toEqual({ received: { q: 'query' } })
-    expect(tools.execute).toHaveBeenCalledWith({ callId: 'run-1:node-1:1', name: 'search', arguments: { q: 'query' }, agent: { session: 'test' }, signal })
+    expect(tools.execute).toHaveBeenCalledWith({ callId: 'run-1:node-1:1', name: 'search', arguments: { q: 'query' }, agent, signal })
+  })
+
+  it('requires the owning DSH Agent before calling the tools service', async () => {
+    const batch = { execute: vi.fn(), setExecutor: () => () => {} }
+    const single = { execute: vi.fn() }
+    const signal = new AbortController().signal
+
+    for (const tools of [batch, single]) {
+      await expect(createDshToolGateway(tools).execute(request(signal, { session: 'not an Agent session' }))).rejects.toMatchObject({
+        code: 'DSH_AGENT_MISSING', nodeId: 'node-1',
+      })
+      expect(tools.execute).not.toHaveBeenCalled()
+    }
   })
 })

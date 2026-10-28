@@ -51,7 +51,10 @@ function singleCall(request: WorkflowToolRequest): DshToolExecutionInput {
 }
 
 async function executeOnService(tools: DshToolService, request: WorkflowToolRequest): Promise<DshToolExecutionResult> {
-  const agent = request.authority as DshAgentLike
+  const agent = request.authority
+  if (!isDshAgentLike(agent)) {
+    throw new WorkflowExecutionError('DSH_AGENT_MISSING', 'tool.call requires the owning DSH Agent', { nodeId: request.nodeId })
+  }
   if (!isBatchToolService(tools)) return (tools as DshToolRuntimeLike).execute({ ...singleCall(request), agent })
   let batch: Awaited<ReturnType<DshToolBatchRuntimeLike['execute']>>
   try {
@@ -72,6 +75,13 @@ async function executeOnService(tools: DshToolService, request: WorkflowToolRequ
     throw new WorkflowExecutionError('DSH_TOOL_FAILED', `DSH tool batch returned ${settled.length} result(s) without one for call ${request.invocationId}`, { nodeId: request.nodeId })
   }
   return entry.result
+}
+
+/** A DSH Agent exposes the Session its tool and subagent calls append to. */
+export function isDshAgentLike(value: unknown): value is DshAgentLike {
+  if (value === null || typeof value !== 'object' || !('session' in value)) return false
+  const session = value.session
+  return session !== null && typeof session === 'object' && 'append' in session && typeof session.append === 'function'
 }
 
 function isToolService(value: DshToolExecute | DshToolService): value is DshToolService {
