@@ -276,6 +276,8 @@ dsh plugin --profile web add @gm-hz/agent-dag-workflow
 
 `1.0.1` 面向 DSH `>=0.2.0-rc.2 <0.3.0`。DSH 0.2 删除了旧的 `dsh-client-runtime`，Canvas 改为依赖 `api-remotes`、`ui-session`、`ui-renderer` 和 `ui-layout`，并从 `uiSession.adapter.current.key` 获取当前会话；旧 DSH 0.1 部署应固定使用本包 `1.0.0`。
 
+0.2 系列内 Subagent 与 Tool 的宿主 API 各换过一次形状，Adapter 在调用时按服务实际暴露的方法选择：`ctx.subagents.start()`（0.2.0-rc.2、0.2.1-alpha.1）或 `startActivation()`（0.2.1-alpha.3 起）；`ctx.tools.execute()` 的单次调用（至 0.2.1-rc.4）或批量调用（0.2.2 起，服务带 `setExecutor()`）。这些形状已按 0.2.0-rc.2、0.2.1-alpha.1/3/5、0.2.1-rc.1 至 rc.4 与 0.2.2-alpha.2 的发布类型核对。版本号只是参考：未发布或自行构建的宿主（例如标为 0.2.1-rc.3 的源码构建）可能已带新形状，Adapter 只按方法判断，不按版本号判断。npm/pnpm 的 semver 不把其他 patch 版本的预发布（如 `0.2.1-rc.3`、`0.2.2-alpha.2`）计入该 peer 范围，安装时会提示 unmet peer，但 Adapter 支持它们。
+
 从当前源码验证时只链接仓库根目录：
 
 ```bash
@@ -288,7 +290,7 @@ dsh web
 插件向 DSH 注册 `workflow-builder` Skill，以及查询节点、创建/更新/校验 draft、发布和运行的受保护工具。Canvas 编辑的是同一份 `WorkflowTemplate`，Trace 来自同一份 Journal。
 Canvas 的“触发与投递”页面还能查看 Binding、重复 Ingress、run 关联和状态不确定的 Delivery，并从入口直接打开权威 Trace。
 
-在 DSH 0.2 中，`agent.run@1` 会把模板声明的 `tools` 映射为原生 `toolFilter.allow`，因此子 Agent 的 Tool 边界仍由 Host 强制执行。DSH 0.2 不再提供逐次启动的 Skill filter；模板中的 `skills` 仍是可审计依赖，并会作为明确的按需加载要求写入子 Agent prompt，实际 Skill 发现和权限继续由 DSH scope 管理。
+`agent.run@1` 声明的 `tools` 只在 Host 能逐次限制子 Agent Tool 时执行：DSH 0.2.0-rc.2 与 0.2.1-alpha.1 把它映射为原生 `toolFilter.allow`，并只选择声明了 `toolFilter` 能力的 subagent provider，子 Agent 的 Tool 边界由 Host 强制执行。DSH 0.2.1-alpha.3 起移除了逐次启动的 `toolFilter`（子 Agent 的 Tool 改由部署配置的 Agent Preset 决定），带 `tools` 的节点会在启动任何子 Agent 前以 `AGENT_TARGET_UNAVAILABLE` 失败，而不是悄悄放宽 Tool 边界；去掉 `tools` 后子 Agent 使用父 Agent 的 Tool scope。DSH 0.2 不再提供逐次启动的 Skill filter；模板中的 `skills` 仍是可审计依赖，并会作为明确的按需加载要求写入子 Agent prompt，实际 Skill 发现和权限继续由 DSH scope 管理。
 
 根 bundle 会把持久 Run 的 `authorityRef` 绑定到稳定的 DSH `Session.id`，并通过 `agents` 服务在重启后恢复当前 Agent；它不会读取旧的 Session 字段，也不会把 Agent object 或凭据写进 SQLite。外部 Tool 在未知副作用边界上恢复时仍会进入 `paused`，需要操作者显式选择 retry/fail。
 

@@ -38,7 +38,14 @@ await ctx.plugin(DagWorkflow, {
 
 从包根加载的 durable bundle 已内置这层 recovery：它要求 DSH `agents` 服务，并使用当前契约的 `agent.session.id` 生成 `dsh-session:<id>`。只有直接装配 `/dsh/host` 时才需要自行提供上面的回调。
 
-插件声明 `inject = ['tools', 'subagents', 'approval', 'skills']`。`tool.call@1` 始终调用当前 Cordis scope 下的 `ctx.tools.execute()`；`agent.run@1` 使用 `ctx.subagents.start()` 并始终 dispose holder-owned run；`human.approval@1` 使用 `ctx.approval.request()`。三者都传入发起运行的 owning Agent、caller-owned signal 和稳定的 run/node call id。DSH 0.2 下，节点 `tools` 被映射为 `toolFilter.allow`；节点 `skills` 作为声明式依赖写入子 Agent prompt，由 DSH Skill scope 完成发现与授权。
+插件声明 `inject = ['tools', 'subagents', 'approval', 'skills']`。`tool.call@1` 始终调用当前 Cordis scope 下的 `ctx.tools.execute()`；`agent.run@1` 使用 `ctx.subagents` 并始终 dispose holder-owned run；`human.approval@1` 使用 `ctx.approval.request()`。三者都传入发起运行的 owning Agent、caller-owned signal 和稳定的 run/node call id。节点 `skills` 作为声明式依赖写入子 Agent prompt，由 DSH Skill scope 完成发现与授权。
+
+DSH 0.2 系列内两代宿主 API 在调用时按服务暴露的方法识别，不按版本号判断：
+
+- 形状按服务实际暴露的方法选择，不按版本号：未发布或自行构建的宿主可能在较低版本号下已带新形状。
+- Tool：0.2.1-rc.4 及以前传单次调用 `{ callId, name, arguments, signal, agent }`；0.2.2 起（`ctx.tools` 带 `setExecutor()`）传只含一个 `{ type: 'tool-call', id, name, arguments: JSON 文本 }` 的批量输入，并按 `callId` 取回唯一结果。批量执行器失败（`ToolBatchExecutionError`）、结果缺失或 `callId` 不匹配都映射为 `DSH_TOOL_FAILED`。批量调用不传 `toolSet`，因此用 `when` 条件注册的 Tool 不会被准入（`UNKNOWN_TOOL`），尽管 `workflow_nodes_list` 仍会列出它们。
+- Agent：0.2.0-rc.2 与 0.2.1-alpha.1 使用 `start()`，节点 `tools` 映射为 `toolFilter.allow`；0.2.1-alpha.3 起使用 `startActivation({ delivery: 'caller' })`，结果只返回给 Workflow，不通知父 Agent 模型。activation 的 signal 只覆盖启动阶段，发布后的取消与超时通过 `dispose()` 完成。
+- Provider 只在声明了节点所需全部能力（`outputSchema`，以及 `tools` 对应的 `toolFilter`）时被选中，没有兼容 provider 时节点以 `AGENT_TARGET_UNAVAILABLE` 失败，不会退回不兼容的 provider。`startActivation()` 没有逐次 Tool 过滤，带 `tools` 的节点因此 fail closed，包括在旧 DSH 上启动、升级后恢复的 run；`workflow_nodes_list` 此时报告 `toolFilter: false`。
 
 `workflow.call@1` 与 `core.foreach@1` 还会读取 `ctx.workflowTemplates` 中的精确 published revision。每个 child 是同一 `ctx.workflowRuns` 中的确定性 run；子流程暂停时父流程进入 `paused/needs_attention`，不会把未知副作用误报成普通失败。
 
@@ -67,7 +74,7 @@ const recovered = await ctx.dagWorkflowEngine.resume({
 })
 ```
 
-`parent` 在公共类型上接受任意 object；运行边界会验证它确实暴露可追加的 Session。Host 对 Tools/Agent 使用窄结构桥接。`1.0.1` 的 DSH 边界是 `@deepseek-ai/cordis@~4.0.4` 与 `@deepseek-ai/dsh-typert-protocol@>=0.2.0-rc.2 <0.3.0`，对应 DSH 0.2；旧 DSH 0.1 使用本包 `1.0.0`。
+`parent` 在公共类型上接受任意 object；运行边界会验证它确实暴露可追加的 Session。Host 对 Tools/Agent 使用窄结构桥接（`DshToolRuntimeLike`/`DshToolBatchRuntimeLike`、`DshSubagentRuntimeLike`/`DshSubagentActivationRuntimeLike`）；`createDshToolGateway()` 既接受单次调用函数，也接受 `ctx.tools` 服务本身。`1.0.1` 的 DSH 边界是 `@deepseek-ai/cordis@~4.0.4` 与 `@deepseek-ai/dsh-typert-protocol@>=0.2.0-rc.2 <0.3.0`，对应 DSH 0.2；semver 不把其他 patch 版本的预发布（如 `0.2.1-rc.3`）计入该范围，包管理器会提示 unmet peer，Adapter 仍按上文识别其 API。旧 DSH 0.1 使用本包 `1.0.0`。
 
 ## 生命周期
 

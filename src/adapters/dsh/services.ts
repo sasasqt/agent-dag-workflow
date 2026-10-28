@@ -8,7 +8,6 @@ import {
   WorkflowScriptRuntimeRegistry,
   jsonExpressionRuntime,
   registerCoreNodes,
-  snapshotJsonValue,
   stableJsonStringify,
   type WorkflowEvent,
   type WorkflowCapabilityDisposer,
@@ -53,12 +52,12 @@ import type {
   DshAgentLike,
   DshDagWorkflowResumeRequest,
   DshDagWorkflowStartRequest,
-  DshToolRuntimeLike,
-  DshSubagentRuntimeLike,
   DshApprovalRuntimeLike,
   DshWorkflowPluginConfig,
   DshWorkflowRun,
 } from './types.js'
+import { executeDshAgent, type DshSubagentService } from './agent-gateway.js'
+import { createDshToolGateway, isDshAgentLike, type DshToolService } from './tool-gateway.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -185,8 +184,8 @@ export class WorkflowScriptRuntimeRegistryService extends Service {
 }
 
 type DshRuntimeContext = Context & {
-  readonly tools: DshToolRuntimeLike
-  readonly subagents: DshSubagentRuntimeLike
+  readonly tools: DshToolService
+  readonly subagents: DshSubagentService
   readonly approval: DshApprovalRuntimeLike
 }
 
@@ -306,75 +305,15 @@ export class DshDagWorkflowEngineService extends DagWorkflowEngineService {
   constructor(ctx: Context, private readonly config: DshWorkflowPluginConfig = {}) {
     super(ctx)
     const runtime = ctx as DshRuntimeContext
-    const tools = runtime.tools
     const services: WorkflowEngineServices = {
       capabilities: ctx.workflowCapabilities.registry,
-      tools: {
-        execute: async request => {
-          if (!isDshAgentLike(request.authority)) {
-            throw new WorkflowExecutionError('DSH_AGENT_MISSING', 'tool.call requires the owning DSH Agent', { nodeId: request.nodeId })
-          }
-          const result = await tools.execute({
-            callId: request.invocationId,
-            name: request.uses,
-            arguments: request.inputs,
-            signal: request.signal,
-            agent: request.authority,
-          })
-          if (result.isError) {
-            throw new WorkflowExecutionError('DSH_TOOL_FAILED', renderError(result.error), { nodeId: request.nodeId })
-          }
-          return result.value
-        },
-      },
+      tools: createDshToolGateway(runtime.tools),
       agents: {
         execute: async request => {
           if (!isDshAgentLike(request.authority)) {
             throw new WorkflowExecutionError('DSH_AGENT_MISSING', 'agent.run requires the owning DSH Agent', { nodeId: request.nodeId })
           }
-          const target = selectCurrentAgentTarget(runtime.subagents, {
-            structuredOutput: request.outputSchema !== undefined,
-            depthLimit: false,
-          })
-          const run = await runtime.subagents.start(target, {
-            label: request.nodeId,
-            prompt: [{ type: 'text', text: renderDshAgentPrompt(request.prompt, request.skills) }],
-            parent: request.authority,
-            signal: request.signal,
-            ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
-            ...(request.tools === undefined ? {} : { toolFilter: { allow: request.tools } }),
-          })
-          let execution: Awaited<typeof run.result> | undefined
-          let executionError: unknown
-          try {
-            execution = await run.result
-          } catch (error: unknown) {
-            executionError = error
-          }
-          let disposalError: unknown
-          try {
-            await run.dispose()
-          } catch (error: unknown) {
-            disposalError = error
-          }
-          if (executionError !== undefined || disposalError !== undefined) {
-            const errors = [executionError, disposalError].filter(error => error !== undefined)
-            throw errors.length === 1 ? errors[0] : new AggregateError(errors, 'subagent execution and disposal failed')
-          }
-          if (execution === undefined) throw new Error('subagent result was not available')
-          if (execution.stopReason !== 'completed') {
-            const diagnostic = execution.diagnostic === undefined ? '' : `: ${execution.diagnostic}`
-            throw new WorkflowExecutionError('DSH_AGENT_FAILED', `subagent stopped with ${execution.stopReason}${diagnostic}`, { nodeId: request.nodeId })
-          }
-          const contentValue = snapshotJsonValue(execution.output)
-          if (!Array.isArray(contentValue)) throw new Error('subagent output was not a JSON array')
-          const content = contentValue as readonly import('../../core/index.js').JsonValue[]
-          const structured = execution.structured === undefined ? undefined : snapshotJsonValue(execution.structured)
-          return {
-            runId: run.id,
-            content,
-            ...(structured === undefined ? {} : { structured }),
-          }
+          return executeDshAgent(runtime.subagents, request, request.authority)
         },
       },
       approvals: {
@@ -485,16 +424,6 @@ export class DshDagWorkflowEngineService extends DagWorkflowEngineService {
   }
 }
 
-function renderDshAgentPrompt(prompt: string, skills: readonly string[] | undefined): string {
-  if (skills === undefined || skills.length === 0) return prompt
-  return [
-    `Required workflow skill dependencies: ${skills.map(skill => JSON.stringify(skill)).join(', ')}.`,
-    'Load and follow those skills when they are available before completing this task.',
-    '',
-    prompt,
-  ].join('\n')
-}
-
 export class WorkflowRecoveryCoordinator {
   static inject = ['workflowRuns', 'dagWorkflowEngine']
 
@@ -576,12 +505,6 @@ function adaptRunHandle(handle: WorkflowRunHandle): DshWorkflowRun {
   }
 }
 
-function isDshAgentLike(value: unknown): value is DshAgentLike {
-  if (value === null || typeof value !== 'object' || !('session' in value)) return false
-  const session = value.session
-  return session !== null && typeof session === 'object' && 'append' in session && typeof session.append === 'function'
-}
-
 function ownerReference(config: DshWorkflowPluginConfig, parent: DshAgentLike): string {
   if (config.recovery === undefined) throw new Error('recovery configuration is required')
   const reference = config.recovery.reference(parent)
@@ -589,24 +512,6 @@ function ownerReference(config: DshWorkflowPluginConfig, parent: DshAgentLike): 
     throw new WorkflowExecutionError('RUN_OWNER_REFERENCE_INVALID', 'recovery.reference must return 1-1024 characters')
   }
   return reference
-}
-
-function selectCurrentAgentTarget(
-  runtime: DshSubagentRuntimeLike,
-  required: { readonly structuredOutput: boolean; readonly depthLimit: boolean },
-): string {
-  const listed = [...runtime.list()]
-  const compatible = listed.filter(name => {
-    const capabilities = runtime.getProvider(name)?.capabilities
-    return (!required.structuredOutput || capabilities?.outputSchema !== false)
-      && (!required.depthLimit || capabilities?.depthLimit !== false)
-  })
-  const candidates = compatible.length > 0 ? compatible : listed
-  for (const preferred of ['spawn', 'general-purpose']) {
-    if (candidates.includes(preferred)) return preferred
-  }
-  if (candidates[0] !== undefined) return candidates[0]
-  throw new WorkflowExecutionError('AGENT_TARGET_UNAVAILABLE', 'DSH has no registered subagent target compatible with this workflow node')
 }
 
 function renderError(error: unknown): string {
