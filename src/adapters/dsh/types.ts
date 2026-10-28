@@ -27,6 +27,7 @@ export interface DshSubagentRunLike {
   dispose(): Promise<void>
 }
 
+/** `ctx.subagents` of DSH 0.2.0-rc.2 and 0.2.1-alpha.1: one-shot `start()` with per-start `toolFilter`. */
 export interface DshSubagentRuntimeLike {
   list(): readonly string[]
   getProvider(name: string): {
@@ -49,6 +50,43 @@ export interface DshSubagentRuntimeLike {
       readonly deny?: readonly string[]
     }
   }): Promise<DshSubagentRunLike>
+}
+
+/**
+ * `ctx.subagents` of DSH 0.2.1-alpha.3 and later: `start()` and the per-start
+ * `toolFilter`/`persona` options were replaced by `startActivation()`.
+ */
+export interface DshSubagentActivationRuntimeLike {
+  list(): readonly string[]
+  getProvider(name: string): {
+    readonly capabilities: {
+      readonly agentOptions: boolean
+      readonly agentPreset: boolean
+      readonly outputSchema: boolean
+      readonly depthLimit: boolean
+    }
+  } | undefined
+  startActivation(spec: DshSubagentActivationSpec): Promise<DshSubagentActivationLike>
+}
+
+export interface DshSubagentActivationSpec {
+  readonly provider: string
+  readonly label: string
+  readonly request: {
+    readonly prompt: readonly { readonly type: 'text'; readonly text: string }[]
+    readonly parent: DshAgentLike
+    readonly outputSchema?: Readonly<Record<string, unknown>>
+  }
+  /** Cancels startup only; a published activation is stopped through `dispose()`. */
+  readonly signal: AbortSignal
+  /** `caller` returns the result to the caller without notifying the parent model. */
+  readonly delivery: 'parent' | 'caller'
+}
+
+export interface DshSubagentActivationLike {
+  readonly childId: string
+  readonly result: DshSubagentRunLike['result']
+  dispose(): Promise<void>
 }
 
 export type DshApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
@@ -75,8 +113,36 @@ export type DshToolRuntimeResult =
   | { readonly isError: false; readonly value: JsonValue }
   | { readonly isError: true; readonly error: unknown }
 
+/** `ctx.tools` of DSH 0.2.0-rc.2 to 0.2.1-rc.4: `execute()` runs one parsed call. */
 export interface DshToolRuntimeLike {
   execute(input: DshToolRuntimeInput): Promise<DshToolRuntimeResult>
+}
+
+/** One raw model-style call; `arguments` is the JSON text the executor parses. */
+export interface DshToolCallBlock {
+  readonly type: 'tool-call'
+  readonly id: string
+  readonly name: string
+  readonly arguments: string
+}
+
+export interface DshToolBatchInput {
+  readonly calls: readonly DshToolCallBlock[]
+  readonly signal: AbortSignal
+  readonly agent?: DshAgentLike
+}
+
+export interface DshToolBatchResult {
+  readonly results: readonly { readonly callId: string; readonly result: DshToolRuntimeResult }[]
+}
+
+/**
+ * `ctx.tools` of DSH 0.2.2 and later: `execute()` takes a call batch and is
+ * delegated to a pluggable executor; `setExecutor()` identifies this shape.
+ */
+export interface DshToolBatchRuntimeLike {
+  execute(input: DshToolBatchInput): Promise<DshToolBatchResult>
+  setExecutor(executor: unknown): () => void
 }
 
 export interface DshToolRunContextLike {

@@ -12,15 +12,15 @@ import {
 import type {
   DshAgentLike,
   DshSkillRuntimeLike,
-  DshSubagentRuntimeLike,
   DshToolRegistryLike,
   DshToolRunContextLike,
   DshWorkflowToolDefinition,
 } from './types.js'
+import { dshAgentCapabilities, type DshSubagentService } from './agent-gateway.js'
 
 type AuthoringContext = Context & {
   readonly tools: DshToolRegistryLike
-  readonly subagents: DshSubagentRuntimeLike
+  readonly subagents: DshSubagentService
   readonly skills: DshSkillRuntimeLike
 }
 
@@ -63,7 +63,7 @@ export function registerWorkflowAuthoring(rawContext: Context): () => void {
 }
 
 export function workflowToolDefinitions(ctx: Context): readonly DshWorkflowToolDefinition[] {
-  const agentCapabilities = currentAgentCapabilities((ctx as AuthoringContext).subagents)
+  const agentCapabilities = dshAgentCapabilities((ctx as AuthoringContext).subagents)
   return [
     tool('workflow_nodes_list', 'List exact workflow NodeDefinitions, pure script runtimes, and DSH Tools visible in the calling Agent scope.', {}, async (_args, execution) => ({
       nodes: ctx.workflowNodes.list().map(node => snapshotJsonValue({
@@ -170,23 +170,6 @@ export function workflowToolDefinitions(ctx: Context): readonly DshWorkflowToolD
       })
     }),
   ]
-}
-
-function currentAgentCapabilities(runtime: DshSubagentRuntimeLike): {
-  readonly outputSchema: boolean
-  readonly depthLimit: boolean
-  readonly toolFilter: boolean
-  readonly persona: boolean
-} {
-  const capabilities = runtime.list()
-    .map(name => runtime.getProvider(name)?.capabilities)
-    .filter(value => value !== undefined)
-  return {
-    outputSchema: capabilities.some(value => value.outputSchema),
-    depthLimit: capabilities.some(value => value.depthLimit),
-    toolFilter: capabilities.some(value => value.toolFilter),
-    persona: capabilities.some(value => value.persona),
-  }
 }
 
 function tool(
